@@ -1,0 +1,32 @@
+# Binaries
+citadel
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output
+*.out
+
+# Dependencies
+/vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ML models (download via setup-ml.sh)
+/models/
+
+# Environment
+.env
+.env.local
