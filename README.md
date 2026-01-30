@@ -754,9 +754,9 @@ Scan images and documents for hidden attacks:
 
 Catch sophisticated attacks that bypass basic defenses:
 
-- **Custom Fine-tuned Models**: Mighty's proprietary BERT models trained on latest attack vectors
-- **PII Detection**: Names, SSN, credit cards, addresses, phone numbers via Presidio NLP
-- **Advanced Multi-turn**: Embedding drift tracking, LLM judge for ambiguous patterns, 30-50 turn memory
+- **Custom Fine-tuned Models**: Mighty's proprietary BERT models trained on latest attack vectors in image, text, and documents!
+- **PII Detection**: Names, SSN, credit cards, addresses, phone numbers
+- **Advanced Multi-turn**: Embedding drift tracking, LLM judge for ambiguous patterns, & turn attack tracking.
 - **Unicode Confusables**: TR39-lite skeleton detection for homoglyph attacks (Cyrillic/Greek lookalikes)
 - **Real-time Threat Intelligence**: Auto-updated attack signatures from threat feeds
 
@@ -768,7 +768,7 @@ Catch sophisticated attacks that bypass basic defenses:
 - **SSO Integration**: SAML/OIDC enterprise authentication
 - **Dashboard UI**: Real-time threat monitoring and analytics
 
-> **Coming Soon!** Sign up at [trymighty.ai](https://trymighty.ai)
+> Sign up the best multimodal defense at [trymighty.ai](https://trymighty.ai)
 
 ---
 
