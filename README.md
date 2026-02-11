@@ -20,7 +20,7 @@ Open source because security needs transparency. Community-driven because attack
 
 ## Requirements
 
-### Go 1.23+
+### Go 1.25+
 
 ```bash
 # macOS
