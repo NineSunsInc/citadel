@@ -8,7 +8,7 @@ import (
 // SHARED INTERFACES FOR OSS + PRO MULTI-TURN DETECTION
 // ============================================================================
 // These interfaces define the contract for multi-turn attack detection.
-// Both OSS (pkg/ml) and Pro (pro/internal/multiturn) implement these interfaces.
+// Shared interfaces for multi-turn detection.
 //
 // OSS implementations:
 //   - InMemorySessionStore: In-memory session storage (15-turn window)
@@ -20,7 +20,6 @@ import (
 
 // MTSessionStore defines pluggable session storage for multi-turn state.
 // OSS uses MTInMemoryStore; Pro can use Redis-backed store.
-// Uses MT prefix to avoid conflict with SessionStore in unified_multiturn.go
 type MTSessionStore interface {
 	// Get retrieves a session by ID. Returns nil, nil if not found.
 	Get(sessionID string) (*SessionState, error)

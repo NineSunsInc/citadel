@@ -1,6 +1,6 @@
 module github.com/TryMightyAI/citadel
 
-go 1.25.5
+go 1.25.7
 
 require (
 	github.com/gofiber/fiber/v3 v3.0.0-rc.3
@@ -11,6 +11,7 @@ require (
 )
 
 require (
+	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/knights-analytics/hugot v0.6.1
@@ -18,7 +19,6 @@ require (
 )
 
 require (
-	github.com/alicebob/miniredis/v2 v2.35.0 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/daulet/tokenizers v1.24.0 // indirect

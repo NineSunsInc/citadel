@@ -45,7 +45,6 @@ type FileSystemPolicy struct {
 type Config struct {
 	// === Core Settings ===
 	AuditLogPath        string // Path to audit log file (default: "audit_events.jsonl")
-	VisionInternalToken string // Internal token for Go->Python auth (optional)
 	EnableHumanApproval bool   // Require human approval for high-risk actions (default: false)
 
 	// === LLM Provider Configuration ===
@@ -93,7 +92,6 @@ func NewDefaultConfig() *Config {
 	cfg := &Config{
 		// Core
 		AuditLogPath:        GetEnv("CITADEL_AUDIT_LOG", "audit_events.jsonl"),
-		VisionInternalToken: GetEnv("CITADEL_VISION_INTERNAL_TOKEN", ""),
 		EnableHumanApproval: GetEnvBool("CITADEL_HUMAN_APPROVAL", false),
 
 		// LLM Provider - defaults to OpenRouter if key is set, otherwise Ollama if available, else none

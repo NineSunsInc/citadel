@@ -60,7 +60,7 @@ type IntentClassifier interface {
 var intentClientFactory func() IntentClassifier
 
 // RegisterIntentClientFactory registers the Pro IntentClient factory.
-// Called from pro/pkg/ml/init().
+// Called by Pro build at init time.
 func RegisterIntentClientFactory(factory func() IntentClassifier) {
 	intentClientFactory = factory
 }

@@ -14,7 +14,7 @@ import (
 //   - Optional semantic similarity (chromem-go + local embeddings)
 //   - Session management (in-memory with sliding window)
 //
-// Pro extends this via embedding in pro/internal/multiturn/detector_pro.go
+// Pro extends this via its own implementation
 // with additional features: drift detection, LLM judge, cost tracking.
 
 // MultiTurnDetector is the OSS multi-turn attack detector.
@@ -209,7 +209,7 @@ func (d *MultiTurnDetector) GetSession(sessionID string) (*SessionState, error) 
 
 // patternResult holds results from pattern detection
 type patternResult struct {
-	matches    []MTPatternMatch
+	matches    []PatternMatch
 	boost      float64
 	phase      string
 	topPattern string
@@ -220,7 +220,7 @@ type patternResult struct {
 // runPatternDetection executes pattern detection on the current session.
 func (d *MultiTurnDetector) runPatternDetection(session *SessionState, content string) *patternResult {
 	result := &patternResult{
-		matches: make([]MTPatternMatch, 0),
+		matches: make([]PatternMatch, 0),
 		reasons: make([]string, 0),
 	}
 
@@ -252,7 +252,7 @@ func (d *MultiTurnDetector) runPatternDetection(session *SessionState, content s
 
 	// Process results
 	for _, p := range patterns {
-		match := MTPatternMatch{
+		match := PatternMatch{
 			PatternName: p.PatternName,
 			Confidence:  p.Confidence,
 			Description: p.Description,

@@ -81,6 +81,10 @@ var decoders = []decoder{
 // Use RegisterDecoder to add Pro-only decoders at init time.
 var proDecoders []decoder
 
+// disabledOSSDecoders tracks OSS decoders that Pro has disabled/replaced.
+// Key is the function name (for identification purposes).
+var disabledOSSDecoders = make(map[ObfuscationType]bool)
+
 // RegisterDecoder adds a decoder to the Pro decoder list.
 // Call this from init() in Pro packages to register advanced decoders.
 // Example: ml.RegisterDecoder(TryConfusableSkeletonLite, ml.ObfuscationHomoglyphs, false)
@@ -88,14 +92,26 @@ func RegisterDecoder(fn func(string) string, obfType ObfuscationType, isChange b
 	proDecoders = append(proDecoders, decoder{fn: fn, obfType: obfType, isChange: isChange})
 }
 
+// DisableOSSDecoder disables an OSS decoder by its ObfuscationType.
+// Call this from Pro init() to replace OSS decoders with better Pro implementations.
+// Example: ml.DisableOSSDecoder(ml.ObfuscationHomoglyphs) // Pro has TryConfusableSkeletonLite
+func DisableOSSDecoder(obfType ObfuscationType) {
+	disabledOSSDecoders[obfType] = true
+}
+
 // allDecoders returns the combined list of OSS and Pro decoders.
+// OSS decoders that have been disabled by Pro are filtered out.
 func allDecoders() []decoder {
-	if len(proDecoders) == 0 {
+	if len(proDecoders) == 0 && len(disabledOSSDecoders) == 0 {
 		return decoders
 	}
-	// Combine: OSS decoders first, then Pro decoders
+	// Combine: OSS decoders (excluding disabled) first, then Pro decoders
 	combined := make([]decoder, 0, len(decoders)+len(proDecoders))
-	combined = append(combined, decoders...)
+	for _, d := range decoders {
+		if !disabledOSSDecoders[d.obfType] {
+			combined = append(combined, d)
+		}
+	}
 	combined = append(combined, proDecoders...)
 	return combined
 }
@@ -310,35 +326,43 @@ func NormalizeLeetspeak(text string) string {
 }
 
 // TryLeetspeakDecode attempts to decode leetspeak and returns the decoded text
-// if it reveals threat patterns
+// if it reveals threat patterns that weren't visible in the original text.
+// v5.3: Only flag as leetspeak if decoding REVEALS NEW attack patterns.
+// This prevents false positives like "Turn 1: attack" being flagged because
+// "1" gets normalized to "I" even though the attack was already visible.
 func TryLeetspeakDecode(text string) string {
 	normalized := NormalizeLeetspeak(text)
 	if normalized == "" {
 		return ""
 	}
 
-	// Check if normalized text reveals threat patterns
-	if DetectsAttackPatterns(normalized) {
+	// Check if normalized text reveals threat patterns that weren't visible before
+	// Only count as leetspeak if decoding reveals something new
+	normalizedHasPatterns := DetectsAttackPatterns(normalized)
+	originalHasPatterns := DetectsAttackPatterns(text)
+
+	if normalizedHasPatterns && !originalHasPatterns {
 		return normalized
 	}
 
 	return ""
 }
 
-func NormalizeHomoglyphs(text string) string {
-	// Unicode homoglyph mapping (Cyrillic/Greek lookalikes → Latin)
-	homoglyphs := map[rune]rune{
-		'а': 'a', 'е': 'e', 'і': 'i', 'о': 'o', 'р': 'p', 'с': 'c', 'у': 'y', 'х': 'x', // Cyrillic lowercase
-		'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'Н': 'H', 'І': 'I', 'К': 'K', 'М': 'M', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X', // Cyrillic uppercase
-		'α': 'a', 'β': 'b', 'ε': 'e', 'η': 'n', 'ι': 'i', 'κ': 'k', 'ν': 'v', 'ρ': 'p', 'τ': 't', 'υ': 'u', 'χ': 'x', // Greek (removed duplicate ο)
-		'ɑ': 'a', 'ɡ': 'g', 'ɩ': 'i', 'ɪ': 'i', // IPA
-		'ℓ': 'l', '𝐚': 'a', '𝐛': 'b', '𝐜': 'c', '𝐝': 'd', '𝐞': 'e', // Math symbols
-		'０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9', // Fullwidth digits
-		'Ａ': 'A', 'Ｂ': 'B', 'Ｃ': 'C', 'Ｄ': 'D', 'Ｅ': 'E', 'Ｆ': 'F', 'Ｇ': 'G', 'Ｈ': 'H', 'Ｉ': 'I', 'Ｊ': 'J', // Fullwidth letters
-	}
+// homoglyphMap is the Unicode homoglyph mapping (Cyrillic/Greek lookalikes → Latin).
+// Package-level to avoid per-call map allocation.
+var homoglyphMap = map[rune]rune{
+	'а': 'a', 'е': 'e', 'і': 'i', 'о': 'o', 'р': 'p', 'с': 'c', 'у': 'y', 'х': 'x', // Cyrillic lowercase
+	'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'Н': 'H', 'І': 'I', 'К': 'K', 'М': 'M', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X', // Cyrillic uppercase
+	'α': 'a', 'β': 'b', 'ε': 'e', 'η': 'n', 'ι': 'i', 'κ': 'k', 'ν': 'v', 'ρ': 'p', 'τ': 't', 'υ': 'u', 'χ': 'x', // Greek (removed duplicate ο)
+	'ɑ': 'a', 'ɡ': 'g', 'ɩ': 'i', 'ɪ': 'i', // IPA
+	'ℓ': 'l', '𝐚': 'a', '𝐛': 'b', '𝐜': 'c', '𝐝': 'd', '𝐞': 'e', // Math symbols
+	'０': '0', '１': '1', '２': '2', '３': '3', '４': '4', '５': '5', '６': '6', '７': '7', '８': '8', '９': '9', // Fullwidth digits
+	'Ａ': 'A', 'Ｂ': 'B', 'Ｃ': 'C', 'Ｄ': 'D', 'Ｅ': 'E', 'Ｆ': 'F', 'Ｇ': 'G', 'Ｈ': 'H', 'Ｉ': 'I', 'Ｊ': 'J', // Fullwidth letters
+}
 
+func NormalizeHomoglyphs(text string) string {
 	return strings.Map(func(r rune) rune {
-		if mapped, ok := homoglyphs[r]; ok {
+		if mapped, ok := homoglyphMap[r]; ok {
 			return mapped
 		}
 		return r
@@ -405,43 +429,18 @@ func TryReverseString(text string) string {
 	return ""
 }
 
-// DetectsAttackPatterns checks if text contains common attack indicators
-// This is used for universal reverse detection to catch FlipAttacks
-// Exported for use by Pro decoders in pro/pkg/ml
-func DetectsAttackPatterns(text string) bool {
-	lowText := strings.ToLower(text)
-
-	// Instruction override patterns
-	overridePatterns := []string{
+// Package-level pattern slices for DetectsAttackPatterns.
+// Hoisted to avoid per-call slice allocation.
+var (
+	attackOverridePatterns = []string{
 		"ignore", "disregard", "forget", "override", "bypass",
 		"skip", "stop", "cancel", "disable", "remove",
 	}
-	instructionWords := []string{
+	attackInstructionWords = []string{
 		"instruction", "rule", "guideline", "policy", "constraint",
 		"previous", "above", "all", "system", "prior",
 	}
-
-	// Check for override + instruction combination
-	hasOverride := false
-	hasInstruction := false
-	for _, p := range overridePatterns {
-		if strings.Contains(lowText, p) {
-			hasOverride = true
-			break
-		}
-	}
-	for _, p := range instructionWords {
-		if strings.Contains(lowText, p) {
-			hasInstruction = true
-			break
-		}
-	}
-	if hasOverride && hasInstruction {
-		return true
-	}
-
-	// Prompt/system extraction patterns (require context to avoid false positives)
-	extractionPatterns := []string{
+	attackExtractionPatterns = []string{
 		"reveal your", "reveal the", "reveal system",
 		"show your prompt", "show me your", "show the system",
 		"print your", "print the prompt", "print system",
@@ -453,32 +452,61 @@ func DetectsAttackPatterns(text string) bool {
 		"secret key", "password", "credential", "api key",
 		"your instructions", "your role is",
 	}
-	for _, p := range extractionPatterns {
+	attackJailbreakPatterns = []string{
+		"pretend", "act as", "roleplay", "you are now",
+		"developer mode", "sudo", "admin", "root",
+		"no restrictions", "unrestricted", "uncensored",
+		"jailbreak", "do anything now", "can do anything",
+	}
+	attackExfilPatterns = []string{
+		"execute", "run", "eval", "exec(",
+		"fetch", "curl", "wget", "http://", "https://",
+		"<script", "javascript:", "onerror",
+	}
+)
+
+// DetectsAttackPatterns checks if text contains common attack indicators
+// This is used for universal reverse detection to catch FlipAttacks
+// Exported for use by extended decoders
+func DetectsAttackPatterns(text string) bool {
+	lowText := strings.ToLower(text)
+
+	// Check for override + instruction combination
+	hasOverride := false
+	hasInstruction := false
+	for _, p := range attackOverridePatterns {
+		if strings.Contains(lowText, p) {
+			hasOverride = true
+			break
+		}
+	}
+	for _, p := range attackInstructionWords {
+		if strings.Contains(lowText, p) {
+			hasInstruction = true
+			break
+		}
+	}
+	if hasOverride && hasInstruction {
+		return true
+	}
+
+	// Prompt/system extraction patterns (require context to avoid false positives)
+	for _, p := range attackExtractionPatterns {
 		if strings.Contains(lowText, p) {
 			return true
 		}
 	}
 
 	// Role-play/jailbreak patterns
-	jailbreakPatterns := []string{
-		"pretend", "act as", "roleplay", "you are now",
-		"developer mode", "sudo", "admin", "root",
-		"no restrictions", "unrestricted", "uncensored",
-		"jailbreak", "dan ", "do anything now",
-	}
-	for _, p := range jailbreakPatterns {
+	// v5.4 Fix: Removed "dan " - too many false positives on the name Dan.
+	for _, p := range attackJailbreakPatterns {
 		if strings.Contains(lowText, p) {
 			return true
 		}
 	}
 
 	// Data exfiltration patterns
-	exfilPatterns := []string{
-		"execute", "run", "eval", "exec(",
-		"fetch", "curl", "wget", "http://", "https://",
-		"<script", "javascript:", "onerror",
-	}
-	for _, p := range exfilPatterns {
+	for _, p := range attackExfilPatterns {
 		if strings.Contains(lowText, p) {
 			return true
 		}
@@ -771,6 +799,8 @@ func isPrintable(s string) bool {
 		return false
 	}
 
+	asciiCount := 0
+	totalCount := 0
 	for _, r := range s {
 		// Reject the Unicode replacement character (U+FFFD)
 		// This catches cases where invalid bytes were converted to the replacement char
@@ -780,8 +810,19 @@ func isPrintable(s string) bool {
 		if !unicode.IsPrint(r) && !unicode.IsSpace(r) {
 			return false
 		}
+		totalCount++
+		// Count ASCII printable characters (space through tilde)
+		if r >= 0x20 && r <= 0x7E {
+			asciiCount++
+		}
 	}
-	return len(s) > 0
+	if totalCount == 0 {
+		return false
+	}
+	// Require >90% ASCII to filter false positives from English words that
+	// happen to be valid base64 but decode to exotic Unicode (e.g. "findings"
+	// decodes to Syriac U+074A). Real base64-encoded attacks decode to ASCII.
+	return float64(asciiCount)/float64(totalCount) > 0.9
 }
 
 // =============================================================================
@@ -895,18 +936,26 @@ func isTypoglycemiaMatch(scrambled, target string) bool {
 	return isAnagram(scrambledMiddle, targetMiddle)
 }
 
-// isAnagram checks if two strings are anagrams of each other
+// isAnagram checks if two strings are anagrams of each other.
+// Optimized: uses a fixed-size array instead of map allocation since
+// typoglycemia targets are ASCII-only lowercase letters.
 func isAnagram(a, b string) bool {
 	if len(a) != len(b) {
 		return false
 	}
 
-	// Count character frequencies
-	freq := make(map[rune]int)
+	// Fixed-size frequency array for ASCII (avoids map allocation)
+	var freq [128]int
 	for _, r := range a {
+		if r >= 128 {
+			return false // Non-ASCII, bail
+		}
 		freq[r]++
 	}
 	for _, r := range b {
+		if r >= 128 {
+			return false
+		}
 		freq[r]--
 		if freq[r] < 0 {
 			return false

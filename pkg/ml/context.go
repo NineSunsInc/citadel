@@ -5,6 +5,66 @@ import (
 	"strings"
 )
 
+// Package-level pattern slices for ContainsMCPAttackPatterns.
+// Hoisted to avoid per-call slice allocations on the hot path.
+var (
+	mcpDescriptionPatterns = []string{
+		"before executing", "first run", "exfiltrate", "_ai_directive",
+		"important:", "<!-- ", "[ai:", "persist:", "override:",
+		"execute this", "shell command", "ignore all", "ignore previous",
+		"disregard", "bypass", "no restrictions", "without restrictions",
+		"run this command", "execute the following", "admin access",
+		"root access", "sudo ", "as administrator",
+	}
+	mcpDangerousURIs = []string{
+		"file:///etc/", "file:///proc/", "file:///sys/",
+		"file:///root/", "file:///home/", "file://c:\\", "file://c:/",
+		".ssh/", ".env", "credentials", "/passwd", "/shadow",
+		"secret", ".pem", ".key", "id_rsa", "id_ed25519",
+	}
+	mcpSchemaAttackPatterns = []string{
+		"execute this", "shell command", "run command", "system command",
+		"override", "bypass", "ignore safety", "no validation",
+	}
+	mcpDangerousMethods = []string{
+		"system.", "eval", "exec", "shell", "admin.", "debug.", "internal.",
+	}
+	mcpCallbackPatterns = []string{
+		"callback", "webhook", "notify_url", "response_url",
+	}
+	mcpSuspiciousDomains = []string{
+		"evil.", "attacker.", "malicious.",
+		"ngrok.io", "webhook.site", "requestbin",
+		"burpcollaborator", "interact.sh",
+		"127.0.0.1", "localhost",
+	}
+	mcpExfilPatterns = []string{
+		"send to", "post to", "upload to", "transmit",
+		"external endpoint", "external server",
+		"log all", "capture all", "record all", "store all",
+	}
+	mcpPoisonPatterns = []string{
+		"safety filters disabled", "no restrictions", "bypass",
+		"override", "admin mode", "unrestricted",
+	}
+	mcpPrototypePollutionPatterns = []string{
+		"__proto__", "constructor", "prototype",
+		"__defineGetter__", "__defineSetter__",
+		"__lookupGetter__", "__lookupSetter__",
+	}
+	mcpPythonDangerousMethods = []string{
+		"__import__", "__class__", "__globals__", "__subclasses__",
+		"__reduce__", "__reduce_ex__", "__getattribute__", "__builtins__",
+		"os.system", "subprocess", "eval(", "exec(", "compile(",
+	}
+	mcpDangerousToolPatterns = []string{
+		"filesystem_write", "filesystem_delete", "shell_execute",
+		"command_execute", "sql_execute", "eval",
+		"/etc/passwd", "/etc/shadow", ".ssh/", ".env",
+		"c:\\windows", "system32",
+	}
+)
+
 // ContainsMCPAttackPatterns detects if JSON content contains MCP/agentic attack patterns.
 // When true, we should NOT apply structural dampening because the JSON IS the attack vector.
 // This catches tool description injection, schema override, resource exfiltration, etc.
@@ -13,31 +73,6 @@ func ContainsMCPAttackPatterns(text string) (bool, string) {
 
 	// 1. MCP TOOL DESCRIPTION INJECTION
 	// Tool descriptions containing hidden instructions for the AI
-	mcpDescriptionPatterns := []string{
-		"before executing",      // "before executing any tool, first run..."
-		"first run",             // "first run exfiltrate_data"
-		"exfiltrate",            // direct exfiltration
-		"_ai_directive",         // hidden AI directive field
-		"important:",            // "IMPORTANT: ignore safety"
-		"<!-- ",                 // HTML comments hiding instructions
-		"[ai:",                  // bracketed AI instructions
-		"persist:",              // persistence instructions
-		"override:",             // override instructions
-		"execute this",          // command injection
-		"shell command",         // shell injection in description
-		"ignore all",            // jailbreak in tool description
-		"ignore previous",       // jailbreak variant
-		"disregard",             // jailbreak variant
-		"bypass",                // bypass instructions
-		"no restrictions",       // jailbreak indicator
-		"without restrictions",  // jailbreak indicator
-		"run this command",      // command injection
-		"execute the following", // command injection
-		"admin access",          // privilege escalation
-		"root access",           // privilege escalation
-		"sudo ",                 // privilege escalation
-		"as administrator",      // privilege escalation
-	}
 	for _, pattern := range mcpDescriptionPatterns {
 		if strings.Contains(lower, pattern) {
 			return true, "mcp_description_injection"
@@ -45,28 +80,8 @@ func ContainsMCPAttackPatterns(text string) (bool, string) {
 	}
 
 	// 2. MCP RESOURCE EXFILTRATION
-	// Dangerous URI schemes or paths in resources/read
 	if strings.Contains(lower, "resources/read") || strings.Contains(lower, "\"uri\"") {
-		dangerousURIs := []string{
-			"file:///etc/",  // Unix system files
-			"file:///proc/", // Linux proc filesystem
-			"file:///sys/",  // Linux sys filesystem
-			"file:///root/", // Root home directory
-			"file:///home/", // User home directories
-			"file://c:\\",   // Windows system drive
-			"file://c:/",    // Windows system drive (forward slash)
-			".ssh/",         // SSH keys
-			".env",          // Environment files
-			"credentials",   // Credential files
-			"/passwd",       // Password file
-			"/shadow",       // Shadow password file
-			"secret",        // Secret files
-			".pem",          // Private keys
-			".key",          // Private keys
-			"id_rsa",        // SSH private key
-			"id_ed25519",    // SSH private key
-		}
-		for _, uri := range dangerousURIs {
+		for _, uri := range mcpDangerousURIs {
 			if strings.Contains(lower, uri) {
 				return true, "mcp_resource_exfil"
 			}
@@ -74,19 +89,8 @@ func ContainsMCPAttackPatterns(text string) (bool, string) {
 	}
 
 	// 3. MCP SCHEMA MANIPULATION
-	// inputSchema containing dangerous field descriptions
 	if strings.Contains(lower, "inputschema") || strings.Contains(lower, "\"properties\"") {
-		schemaAttackPatterns := []string{
-			"execute this",
-			"shell command",
-			"run command",
-			"system command",
-			"override",
-			"bypass",
-			"ignore safety",
-			"no validation",
-		}
-		for _, pattern := range schemaAttackPatterns {
+		for _, pattern := range mcpSchemaAttackPatterns {
 			if strings.Contains(lower, pattern) {
 				return true, "mcp_schema_attack"
 			}
@@ -94,18 +98,8 @@ func ContainsMCPAttackPatterns(text string) (bool, string) {
 	}
 
 	// 4. JSON-RPC DANGEROUS METHODS
-	// Suspicious method names in JSON-RPC calls
 	if strings.Contains(lower, "jsonrpc") && strings.Contains(lower, "method") {
-		dangerousMethods := []string{
-			"system.",   // System-level calls
-			"eval",      // Code evaluation
-			"exec",      // Code execution
-			"shell",     // Shell access
-			"admin.",    // Admin operations
-			"debug.",    // Debug operations
-			"internal.", // Internal operations
-		}
-		for _, method := range dangerousMethods {
+		for _, method := range mcpDangerousMethods {
 			if strings.Contains(lower, method) {
 				return true, "jsonrpc_dangerous_method"
 			}
@@ -113,23 +107,9 @@ func ContainsMCPAttackPatterns(text string) (bool, string) {
 	}
 
 	// 5. CALLBACK/WEBHOOK HIJACKING
-	// Suspicious callback URLs
-	callbackPatterns := []string{
-		"callback",
-		"webhook",
-		"notify_url",
-		"response_url",
-	}
-	for _, pattern := range callbackPatterns {
+	for _, pattern := range mcpCallbackPatterns {
 		if strings.Contains(lower, pattern) {
-			// Check if it contains suspicious domains/IPs
-			suspiciousDomains := []string{
-				"evil.", "attacker.", "malicious.",
-				"ngrok.io", "webhook.site", "requestbin",
-				"burpcollaborator", "interact.sh",
-				"127.0.0.1", "localhost",
-			}
-			for _, domain := range suspiciousDomains {
+			for _, domain := range mcpSuspiciousDomains {
 				if strings.Contains(lower, domain) {
 					return true, "callback_hijack"
 				}
@@ -138,37 +118,15 @@ func ContainsMCPAttackPatterns(text string) (bool, string) {
 	}
 
 	// 6. DATA EXFILTRATION VIA ERROR/RESPONSE
-	// JSON containing exfiltration indicators
-	exfilPatterns := []string{
-		"send to",
-		"post to",
-		"upload to",
-		"transmit",
-		"external endpoint",
-		"external server",
-		"log all",
-		"capture all",
-		"record all",
-		"store all",
-	}
-	for _, pattern := range exfilPatterns {
+	for _, pattern := range mcpExfilPatterns {
 		if strings.Contains(lower, pattern) {
 			return true, "data_exfiltration"
 		}
 	}
 
 	// 7. CACHE/STATE POISONING
-	// JSON containing cache manipulation
 	if strings.Contains(lower, "cache") || strings.Contains(lower, "cached") {
-		poisonPatterns := []string{
-			"safety filters disabled",
-			"no restrictions",
-			"bypass",
-			"override",
-			"admin mode",
-			"unrestricted",
-		}
-		for _, pattern := range poisonPatterns {
+		for _, pattern := range mcpPoisonPatterns {
 			if strings.Contains(lower, pattern) {
 				return true, "cache_poisoning"
 			}
@@ -176,69 +134,26 @@ func ContainsMCPAttackPatterns(text string) (bool, string) {
 	}
 
 	// 8. PROTOTYPE POLLUTION (JavaScript/Node.js attacks)
-	// These fields are used to pollute object prototypes
-	prototypePollutionPatterns := []string{
-		"__proto__",        // Direct prototype access
-		"constructor",      // Constructor manipulation
-		"prototype",        // Prototype property
-		"__defineGetter__", // Legacy getter manipulation
-		"__defineSetter__", // Legacy setter manipulation
-		"__lookupGetter__", // Legacy getter lookup
-		"__lookupSetter__", // Legacy setter lookup
-	}
 	protoMatchCount := 0
-	for _, pattern := range prototypePollutionPatterns {
+	for _, pattern := range mcpPrototypePollutionPatterns {
 		if strings.Contains(lower, pattern) {
 			protoMatchCount++
 		}
 	}
-	// Need at least 2 signals to avoid FP on benign uses
 	if protoMatchCount >= 2 {
 		return true, "prototype_pollution"
 	}
 
 	// 9. PYTHON/PICKLE DANGEROUS METHODS
-	// Dangerous Python dunder methods and pickle exploitation
-	pythonDangerousMethods := []string{
-		"__import__",       // Import arbitrary modules
-		"__class__",        // Class manipulation
-		"__globals__",      // Access global namespace
-		"__subclasses__",   // Class introspection
-		"__reduce__",       // Pickle exploitation
-		"__reduce_ex__",    // Pickle exploitation
-		"__getattribute__", // Attribute access override
-		"__builtins__",     // Builtin access
-		"os.system",        // System command execution
-		"subprocess",       // Process execution
-		"eval(",            // Code evaluation
-		"exec(",            // Code execution
-		"compile(",         // Code compilation
-	}
-	for _, method := range pythonDangerousMethods {
+	for _, method := range mcpPythonDangerousMethods {
 		if strings.Contains(lower, method) {
 			return true, "python_dangerous_method"
 		}
 	}
 
 	// 10. MCP TOOL CALL ABUSE
-	// Dangerous tool calls via MCP's tools/call method
 	if strings.Contains(lower, "tools/call") || strings.Contains(lower, "tools_call") {
-		// Check for dangerous tool names or file paths
-		dangerousToolPatterns := []string{
-			"filesystem_write",  // Writing to filesystem
-			"filesystem_delete", // Deleting files
-			"shell_execute",     // Shell execution
-			"command_execute",   // Command execution
-			"sql_execute",       // SQL execution
-			"eval",              // Code evaluation
-			"/etc/passwd",       // Sensitive Unix file
-			"/etc/shadow",       // Password hashes
-			".ssh/",             // SSH keys
-			".env",              // Environment secrets
-			"c:\\windows",       // Windows system
-			"system32",          // Windows system
-		}
-		for _, pattern := range dangerousToolPatterns {
+		for _, pattern := range mcpDangerousToolPatterns {
 			if strings.Contains(lower, pattern) {
 				return true, "mcp_tool_call_abuse"
 			}
@@ -1062,6 +977,8 @@ const (
 	StructuralContextLegal StructuralContextType = "legal_document"
 	// v4.12: Invoices, receipts, and financial documents (OCR from images)
 	StructuralContextInvoice StructuralContextType = "invoice_receipt"
+	// v5.3: .gitignore and similar ignore pattern files
+	StructuralContextGitignore StructuralContextType = "gitignore_file"
 )
 
 // StructuralContextResult contains the result of structural context detection
@@ -1130,6 +1047,96 @@ func DetectStructuralContext(text string) StructuralContextResult {
 		result.Type = StructuralContextCodeBlock
 		result.Confidence = minFloat64(float64(codeSignals)*0.15, 0.95)
 		result.Signals = append(result.Signals, "code_structure")
+		return result
+	}
+
+	// 1b. GITIGNORE FILE DETECTION (v5.3)
+	// .gitignore and similar ignore pattern files have distinctive structure:
+	// - Lines starting with # (comments)
+	// - Lines with wildcards (*.pyc, *.log)
+	// - Lines ending with / (directory patterns)
+	// - Lines starting with ! (negation)
+	// - Common entries: __pycache__, node_modules, .env
+	// These files naturally contain words like "ignore" that trigger false positives
+	gitignoreSignals := 0
+	commentLines := 0
+	wildcardLines := 0
+	directoryPatterns := 0
+	negationPatterns := 0
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if len(trimmed) == 0 {
+			continue
+		}
+
+		// Comment lines (very common in gitignore)
+		if strings.HasPrefix(trimmed, "#") {
+			commentLines++
+			// Extra signal if comment mentions "gitignore", "git", or "ignore"
+			lowerLine := strings.ToLower(trimmed)
+			if strings.Contains(lowerLine, "gitignore") || strings.Contains(lowerLine, ".gitignore") {
+				gitignoreSignals += 3 // Strong signal
+			} else if strings.Contains(lowerLine, "ignore") && !strings.Contains(lowerLine, "ignore all") {
+				gitignoreSignals++
+			}
+			continue
+		}
+
+		// Wildcard patterns (*.pyc, *.log, **/cache)
+		if strings.Contains(trimmed, "*") {
+			wildcardLines++
+			gitignoreSignals++
+		}
+
+		// Directory patterns ending with /
+		if strings.HasSuffix(trimmed, "/") {
+			directoryPatterns++
+			gitignoreSignals++
+		}
+
+		// Negation patterns starting with !
+		if strings.HasPrefix(trimmed, "!") {
+			negationPatterns++
+			gitignoreSignals++
+		}
+
+		// Common gitignore entries (without wildcards)
+		commonGitignoreEntries := []string{
+			"__pycache__", "node_modules", ".env", ".venv", "venv/",
+			".idea", ".vscode", ".DS_Store", "Thumbs.db",
+			"dist/", "build/", "target/", "bin/", "obj/",
+			"*.pyc", "*.pyo", "*.class", "*.o", "*.a",
+			".cache", ".pytest_cache", ".mypy_cache",
+			"coverage/", ".coverage", "htmlcov/",
+			"*.log", "*.tmp", "*.bak", "*.swp",
+			".git/", ".svn/", ".hg/",
+		}
+		for _, entry := range commonGitignoreEntries {
+			if trimmed == entry || strings.HasPrefix(trimmed, entry) {
+				gitignoreSignals++
+				break
+			}
+		}
+	}
+
+	// Multiple comment lines + wildcards/directories = very likely gitignore
+	if commentLines >= 1 {
+		gitignoreSignals += commentLines
+	}
+	if wildcardLines >= 2 {
+		gitignoreSignals += 2
+	}
+	if directoryPatterns >= 1 {
+		gitignoreSignals++
+	}
+
+	// Require strong signals to classify as gitignore
+	// Minimum: 4 signals (e.g., 2 comments + 2 wildcards, or 1 explicit gitignore mention + 1 wildcard)
+	if gitignoreSignals >= 4 {
+		result.Type = StructuralContextGitignore
+		result.Confidence = minFloat64(float64(gitignoreSignals)*0.12, 0.95)
+		result.Signals = append(result.Signals, "gitignore_structure")
 		return result
 	}
 
@@ -1715,6 +1722,8 @@ var structuralDampeningFactors = map[StructuralContextType]StructuralDampeningCo
 	StructuralContextLegal: {BaseFactor: 0.60, MinResult: 0.15}, // High trust - formal legal language
 	// v4.12: Invoices/receipts - high trust (OCR from financial documents)
 	StructuralContextInvoice: {BaseFactor: 0.65, MinResult: 0.10}, // High trust - financial documents
+	// v5.3: Gitignore files - high trust (config files with distinctive patterns)
+	StructuralContextGitignore: {BaseFactor: 0.70, MinResult: 0.10}, // Very high trust - "ignore" is benign here
 }
 
 // GetStructuralDampeningFactor returns the dampening factor for a context type

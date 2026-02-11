@@ -109,6 +109,14 @@ func SlowClient() *http.Client {
 	return Client(TierSlow)
 }
 
+// CloneSharedTransport returns a shallow copy of the shared transport suitable
+// for per-call customization (e.g., overriding DialContext).
+//
+// Callers must not mutate the package-level sharedTransport directly.
+func CloneSharedTransport() *http.Transport {
+	return sharedTransport.Clone()
+}
+
 // ReadResponseBody safely reads an HTTP response body with size limits.
 // This prevents OOM attacks from malicious or compromised services.
 //
