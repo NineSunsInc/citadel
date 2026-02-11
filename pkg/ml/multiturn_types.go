@@ -5,22 +5,19 @@ import (
 )
 
 // ============================================================================
-// OSS MULTI-TURN DETECTION TYPES
+// MULTI-TURN DETECTION TYPES
 // ============================================================================
-// Core types for multi-turn attack detection in OSS. These types do NOT
-// contain Pro-specific fields (drift, budget, LLM judge, intent classification).
+// Core types for multi-turn attack detection. These types are the canonical
+// API surface for both OSS and Pro multi-turn detection.
 //
-// Pro extends these via embedding in pro/internal/multiturn/types.go.
-//
-// NOTE: During development, unified_multiturn.go contains similar types with
-// "Unified" prefix for Pro. The extraction script (extract-oss.sh) excludes
-// unified_multiturn.go and includes these OSS types.
+// In OSS mode, semantic/LLM/intent fields are zero-valued (graceful degradation).
+// In Pro mode, the Pro MultiTurnAnalyzer populates all fields.
 //
 // Type locations:
 //   - TurnData, PatternRisk, StoredPatternSignal, CrossWindowContext:
 //     Defined in multiturn_patterns.go (pattern detection types)
 //   - MultiTurnRequest, MultiTurnResponse, SessionState, MTTurnRecord:
-//     Defined here (session and API types for OSS detector)
+//     Defined here (session and API types)
 
 // MultiTurnRequest is the OSS API entry point for multi-turn detection.
 type MultiTurnRequest struct {
@@ -36,7 +33,9 @@ type MultiTurnRequest struct {
 	Profile string `json:"profile,omitempty"`
 }
 
-// MultiTurnResponse contains OSS detection results.
+// MultiTurnResponse contains multi-turn detection results.
+// In OSS mode, semantic/LLM/intent fields are zero-valued.
+// In Pro mode, the Pro MultiTurnAnalyzer populates all fields.
 type MultiTurnResponse struct {
 	// Decision
 	Verdict     string  `json:"verdict"`      // ALLOW, BLOCK, WARN
@@ -47,25 +46,51 @@ type MultiTurnResponse struct {
 	TurnNumber   int `json:"turn_number"`
 	SessionTurns int `json:"session_turns"`
 
-	// Pattern detection results
-	PatternMatches []MTPatternMatch `json:"pattern_matches,omitempty"`
-	PatternBoost   float64          `json:"pattern_boost"`
-	PatternPhase   string           `json:"pattern_phase,omitempty"`
+	// Layer 1: Pattern detection results
+	PatternMatches []PatternMatch `json:"pattern_matches,omitempty"`
+	PatternBoost   float64        `json:"pattern_boost"`
+	PatternPhase   string         `json:"pattern_phase,omitempty"`
 
-	// Semantic detection results (if enabled)
-	SemanticScore float64 `json:"semantic_score,omitempty"`
+	// Layer 2: Semantic detection (populated by Pro, zero in OSS)
+	SemanticScore      float64 `json:"semantic_score,omitempty"`
+	SemanticPhase      string  `json:"semantic_phase,omitempty"`
+	SemanticConfidence float64 `json:"semantic_confidence,omitempty"`
+	TrajectoryDrift    float64 `json:"trajectory_drift,omitempty"`
+	DriftAccelerating  bool    `json:"drift_accelerating,omitempty"`
+	AggregateScore     float64 `json:"aggregate_score,omitempty"`
+	CentroidDistance   float64 `json:"centroid_distance,omitempty"`
+
+	// Layer 3: LLM judgment (populated by Pro, nil in OSS)
+	LLMVerdict   *string `json:"llm_verdict,omitempty"`
+	LLMReasoning *string `json:"llm_reasoning,omitempty"`
+	LLMInvoked   bool    `json:"llm_invoked,omitempty"`
 
 	// Combined analysis
-	FinalScore   float64  `json:"final_score"`
-	BlockReasons []string `json:"block_reasons,omitempty"`
+	FinalScore      float64  `json:"final_score"`
+	RawScore        float64  `json:"raw_score,omitempty"`        // Score before context discount
+	ContextDiscount float64  `json:"context_discount,omitempty"` // Discount applied
+	BlockReasons    []string `json:"block_reasons,omitempty"`
+
+	// Processing metadata
+	LayersInvoked  []string `json:"layers_invoked,omitempty"`
+	ModelUsed      string   `json:"model_used,omitempty"`
+	TokensConsumed int      `json:"tokens_consumed,omitempty"`
+
+	// Context signals detected
+	ContextSignals *ContextSignals `json:"context_signals,omitempty"`
+
+	// Intent type classification (populated when available)
+	IntentType       string  `json:"intent_type,omitempty"`
+	IntentConfidence float64 `json:"intent_confidence,omitempty"`
+	IntentDiscount   float64 `json:"intent_discount,omitempty"`
+	ProfileUsed      string  `json:"profile_used,omitempty"`
 
 	// Processing time
 	LatencyMs int `json:"latency_ms"`
 }
 
-// MTPatternMatch represents a detected pattern in multi-turn context.
-// Uses MT prefix to avoid conflict with PatternMatchResult in unified_multiturn.go
-type MTPatternMatch struct {
+// PatternMatch represents a detected pattern in multi-turn context.
+type PatternMatch struct {
 	PatternName string  `json:"pattern_name"`
 	Confidence  float64 `json:"confidence"`
 	Description string  `json:"description"`
@@ -73,8 +98,7 @@ type MTPatternMatch struct {
 	IsPartial   bool    `json:"is_partial,omitempty"`
 }
 
-// SessionState tracks multi-turn session state for OSS.
-// Pro extends this with Trajectory, Budget, and IntentHistory fields.
+// SessionState tracks multi-turn session state.
 type SessionState struct {
 	SessionID   string    `json:"session_id"`
 	OrgID       string    `json:"org_id"`
@@ -99,7 +123,6 @@ type SessionState struct {
 }
 
 // MTTurnRecord stores a single turn's data for multi-turn detection.
-// Uses MT prefix to avoid conflict with TurnRecord in unified_multiturn.go
 type MTTurnRecord struct {
 	TurnNumber    int       `json:"turn_number"`
 	Content       string    `json:"content"`
@@ -107,6 +130,8 @@ type MTTurnRecord struct {
 	Phase         string    `json:"phase"`
 	Confidence    float64   `json:"confidence"`
 	PatternMatch  string    `json:"pattern_match,omitempty"`
+	ModelUsed     string    `json:"model_used,omitempty"`
+	TokensUsed    int       `json:"tokens_used,omitempty"`
 	Verdict       string    `json:"verdict"`
 	Timestamp     time.Time `json:"timestamp"`
 	ProcessTimeMs int       `json:"process_time_ms"`

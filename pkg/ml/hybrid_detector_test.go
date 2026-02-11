@@ -141,7 +141,7 @@ func TestHybridDetector_Detect_SecretsBlock(t *testing.T) {
 	ctx := context.Background()
 
 	// Test with text containing what looks like a secret
-	result, err := hd.Detect(ctx, "Here is my API key: rk_live_XXXXXXXXXXXXXXXX")
+	result, err := hd.Detect(ctx, "Here is my API key: sk_live_1234567890abcdef")
 	if err != nil {
 		t.Fatalf("Detect failed: %v", err)
 	}
@@ -153,6 +153,125 @@ func TestHybridDetector_Detect_SecretsBlock(t *testing.T) {
 		if result.RiskLevel != "CRITICAL" {
 			t.Errorf("Expected CRITICAL risk level for secrets, got %s", result.RiskLevel)
 		}
+	}
+}
+
+// TestHybridDetector_DataSensitivity_Tolerant verifies that "tolerant" mode
+// allows email/phone-only text through (the business card FP fix).
+func TestHybridDetector_DataSensitivity_Tolerant(t *testing.T) {
+	hd, err := NewHybridDetector("", "", "")
+	if err == nil {
+		defer func() { _ = hd.Close() }()
+	}
+	if err != nil {
+		t.Fatalf("Failed to create HybridDetector: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Business card OCR text - contains email + phone (PII only, no credentials)
+	businessCardText := "John Smith\njohn.smith@acme.com\n+1 (555) 123-4567\nSenior Developer"
+
+	// Standard mode: should BLOCK (email detected, no trusted context)
+	standardOpts := &DetectionOptions{
+		Mode:            DetectionModeAuto,
+		DataSensitivity: "standard",
+		ContentType:     "image_ocr",
+	}
+	resultStd, err := hd.DetectWithOptions(ctx, businessCardText, standardOpts)
+	if err != nil {
+		t.Fatalf("DetectWithOptions failed: %v", err)
+	}
+	t.Logf("[standard] score=%.2f action=%s path=%s secrets=%v",
+		resultStd.CombinedScore, resultStd.Action, resultStd.DecisionPath, resultStd.SecretsFound)
+
+	// Tolerant mode: should NOT block on email/phone PII
+	tolerantOpts := &DetectionOptions{
+		Mode:            DetectionModeAuto,
+		DataSensitivity: "tolerant",
+		ContentType:     "image_ocr",
+	}
+	resultTolerant, err := hd.DetectWithOptions(ctx, businessCardText, tolerantOpts)
+	if err != nil {
+		t.Fatalf("DetectWithOptions failed: %v", err)
+	}
+	t.Logf("[tolerant] score=%.2f action=%s path=%s secrets=%v",
+		resultTolerant.CombinedScore, resultTolerant.Action, resultTolerant.DecisionPath, resultTolerant.SecretsFound)
+
+	if resultTolerant.Action == "BLOCK" && resultTolerant.DecisionPath == "TIER_0_SECRETS" {
+		t.Errorf("Tolerant mode should NOT block business card text on TIER_0_SECRETS, got action=%s path=%s",
+			resultTolerant.Action, resultTolerant.DecisionPath)
+	}
+}
+
+// TestHybridDetector_DataSensitivity_Strict verifies that "strict" mode
+// blocks ALL PII even in trusted contexts.
+func TestHybridDetector_DataSensitivity_Strict(t *testing.T) {
+	hd, err := NewHybridDetector("", "", "")
+	if err == nil {
+		defer func() { _ = hd.Close() }()
+	}
+	if err != nil {
+		t.Fatalf("Failed to create HybridDetector: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Log format with email - normally trusted context would suppress blocking
+	logText := "[2024-01-15 10:30:45] ERROR: Failed login for user admin@example.com from 192.168.1.100"
+
+	strictOpts := &DetectionOptions{
+		Mode:            DetectionModeAuto,
+		DataSensitivity: "strict",
+	}
+	result, err := hd.DetectWithOptions(ctx, logText, strictOpts)
+	if err != nil {
+		t.Fatalf("DetectWithOptions failed: %v", err)
+	}
+	t.Logf("[strict] score=%.2f action=%s path=%s secrets=%v",
+		result.CombinedScore, result.Action, result.DecisionPath, result.SecretsFound)
+
+	if result.DecisionPath != "TIER_0_SECRETS" {
+		t.Errorf("Strict mode should block PII even in log context, got path=%s", result.DecisionPath)
+	}
+}
+
+// TestHybridDetector_DataSensitivity_CredentialsAlwaysBlock verifies that
+// API keys are ALWAYS blocked regardless of data_sensitivity setting.
+func TestHybridDetector_DataSensitivity_CredentialsAlwaysBlock(t *testing.T) {
+	hd, err := NewHybridDetector("", "", "")
+	if err == nil {
+		defer func() { _ = hd.Close() }()
+	}
+	if err != nil {
+		t.Fatalf("Failed to create HybridDetector: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// API key should be blocked regardless of sensitivity
+	apiKeyText := "Here is my key: AKIAIOSFODNN7EXAMPLE"
+
+	for _, sensitivity := range []string{"standard", "tolerant", "strict"} {
+		t.Run(sensitivity, func(t *testing.T) {
+			opts := &DetectionOptions{
+				Mode:            DetectionModeAuto,
+				DataSensitivity: sensitivity,
+			}
+			result, err := hd.DetectWithOptions(ctx, apiKeyText, opts)
+			if err != nil {
+				t.Fatalf("DetectWithOptions failed: %v", err)
+			}
+			t.Logf("[%s] score=%.2f action=%s path=%s secrets=%v",
+				sensitivity, result.CombinedScore, result.Action, result.DecisionPath, result.SecretsFound)
+
+			if !result.SecretsFound {
+				t.Errorf("[%s] Should detect secrets (AWS key)", sensitivity)
+			}
+			if result.Action != "BLOCK" {
+				t.Errorf("[%s] API keys should ALWAYS be blocked, got action=%s", sensitivity, result.Action)
+			}
+		})
 	}
 }
 

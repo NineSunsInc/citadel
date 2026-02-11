@@ -78,6 +78,53 @@ func TestRedactSecrets_IPv4_Octet_Validation(t *testing.T) {
 	}
 }
 
+func TestClassifySecrets(t *testing.T) {
+	scorer := &ThreatScorer{}
+
+	tests := []struct {
+		name            string
+		input           string
+		wantCredentials bool
+		wantPII         bool
+	}{
+		// Pure credentials
+		{"aws_key", "Key is AKIAIOSFODNN7EXAMPLE", true, false},
+		{"stripe_live", "Using sk_live_4eC39HqLyjWDarjtT1zdp7dc", true, false},
+		{"github_pat", "Token ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", true, false},
+		{"private_key", "-----BEGIN RSA PRIVATE KEY-----\nMIICXAIBAAJBAKj34GkxFhD90vcN\n-----END RSA PRIVATE KEY-----", true, false},
+		{"jwt_token", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c", true, false},
+		{"db_conn", "postgresql://user:pass@host:5432/db", true, false},
+
+		// Pure PII
+		{"email_only", "Contact admin@example.com for help", false, true},
+		{"ssn_only", "SSN: 123-45-6789", false, true},
+		{"credit_card", "Card: 4111 1111 1111 1111", false, true},
+		{"ip_address", "Server at 8.8.8.8", false, true},
+
+		// Mixed: credentials + PII
+		{"aws_and_email", "Key AKIAIOSFODNN7EXAMPLE email admin@test.com", true, true},
+
+		// Business card OCR text (the FP case)
+		{"business_card", "John Smith\njohn.smith@acme.com\n+1 (555) 123-4567\nSenior Developer", false, true},
+
+		// Clean text
+		{"clean_text", "Hello, how are you today?", false, false},
+		{"code_snippet", "func main() { fmt.Println(\"hello\") }", false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			finding := scorer.ClassifySecrets(tt.input)
+			if finding.HasCredentials != tt.wantCredentials {
+				t.Errorf("HasCredentials: got %v, want %v", finding.HasCredentials, tt.wantCredentials)
+			}
+			if finding.HasPII != tt.wantPII {
+				t.Errorf("HasPII: got %v, want %v", finding.HasPII, tt.wantPII)
+			}
+		})
+	}
+}
+
 func TestRedactSecrets_OtherPatterns(t *testing.T) {
 	scorer := &ThreatScorer{}
 
@@ -87,7 +134,7 @@ func TestRedactSecrets_OtherPatterns(t *testing.T) {
 		contains string
 	}{
 		{"aws_key", "Key is AKIAIOSFODNN7EXAMPLE", "[AWS_KEY_REDACTED_BY_CITADEL]"},
-		{"stripe_live", "Using rk_live_XXXXXXXXXXXXXXXXXXXX", "[STRIPE_KEY_REDACTED_BY_CITADEL]"},
+		{"stripe_live", "Using sk_live_4eC39HqLyjWDarjtT1zdp7dc", "[STRIPE_KEY_REDACTED_BY_CITADEL]"},
 		{"github_pat", "Token ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "[GITHUB_TOKEN_REDACTED_BY_CITADEL]"},
 		{"email", "Contact admin@example.com for help", "[EMAIL_REDACTED]"},
 		{"ssn", "SSN: 123-45-6789", "[SSN_REDACTED]"},
